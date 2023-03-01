@@ -1,0 +1,53 @@
+#!/bin/bash
+
+set -e
+set -v
+
+export EMAIL=
+export GITHUB_USERNAME=
+#PPA_NAME = your GitHub repository name
+export PPA_NAME= 
+
+(
+set -e
+set -v
+
+git clone "git@github.com:${GITHUB_USERNAME}/${PPA_NAME}.git"
+cd ${PPA_NAME}
+
+read -p "Do you want to generate a new GPG key? [y/N]: " generate_key
+
+if [ "$generate_key" = "y" ]; then
+    gpg --full-gen-key
+    echo "Selecting RSA and RSA (default)"
+    echo -e "Key is valid for? (0) 0\ny" | gpg --expert --edit-key "${EMAIL}"
+fi
+
+gpg --export-secret-keys "${EMAIL}" > my-private-key.asc
+gpg --import my-private-key.asc
+gpg --armor --export "${EMAIL}" > KEY.gpg 
+
+# Packages & Packages.gz
+dpkg-scanpackages --multiversion . > Packages
+gzip -k -f Packages
+
+# Release, Release.gpg & InRelease
+apt-ftparchive release . > Release
+gpg --default-key "${EMAIL}" -abs -o - Release > Release.gpg
+gpg --default-key "${EMAIL}" --clearsign -o - Release > InRelease
+
+echo "deb [signed-by=/etc/apt/trusted.gpg.d/KEY.gpg] https://${GITHUB_USERNAME}.github.io/${PPA_NAME} ./" > ${PPA_NAME}.list
+
+# Commit & push
+git add -A
+git commit -m update
+git push
+)
+
+read -p "Do you want to add the repository to your system? [y/N]: " add_repo
+
+if [ "$add_repo" = "y" ]; then
+    curl -s --compressed "https://${GITHUB_USERNAME}.github.io/${PPA_NAME}/KEY.gpg" | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/KEY.gpg >/dev/null
+    sudo curl -s --compressed -o /etc/apt/sources.list.d/${PPA_NAME}.list "https://${GITHUB_USERNAME}.github.io/${PPA_NAME}/${PPA_NAME}.list"
+    sudo apt update
+fi
