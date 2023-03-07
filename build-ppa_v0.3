@@ -1,0 +1,122 @@
+#!/bin/bash
+
+# function to read input and validate email format
+function read_email() {
+    while true
+    do
+      read -p "Enter your email: " email
+      if [[ $email == *[@]* ]]; then
+        export EMAIL="$email"
+        echo "Email saved: $EMAIL"
+        break
+      else
+        echo "Invalid email format. Please try again."
+      fi
+    done
+}
+
+# function to read input and validate GitHub username format
+function read_github_username() {
+    while true
+    do
+      read -p "Enter your GitHub username (Latin characters only): " github_username
+      if [[ $github_username =~ ^[a-zA-Z0-9_]+$ ]]; then
+        export GITHUB_USERNAME="$github_username"
+        echo "GitHub username saved: $GITHUB_USERNAME"
+        break
+      else
+        echo "Invalid GitHub username format. Please try again."
+      fi
+    done
+}
+
+# function to read input and validate repository name format
+function read_ppa_name() {
+    while true
+    do
+      read -p "Enter the name of your repository on GitHub (Latin characters only): " ppa_name
+      if [[ $ppa_name =~ ^[a-zA-Z0-9_]+$ ]]; then
+        export PPA_NAME="$ppa_name"
+        echo "GitHub repository name saved: $PPA_NAME"
+        break
+      else
+        echo "Invalid GitHub repository name format. Please try again."
+      fi
+    done
+}
+
+# function to generate GPG key if requested
+function generate_gpg_key() {
+    if gpg --list-keys > /dev/null 2>&1; then
+        read -p "Do you want to use an existing GPG key or generate a new one? [u/g]: " use_or_generate_key
+        if [ "$use_or_generate_key" = "u" ]; then
+            echo "Please enter the ID of the existing GPG key:"
+            read existing_key_id
+            export GPG_KEYID=$existing_key_id
+        else
+            gpg --full-gen-key
+            echo "Selecting RSA and RSA (default)"
+            echo -e "Key is valid for? (0) 0\ny" | gpg --expert --edit-key "${EMAIL}"
+        fi
+    else
+        read -p "GPG key is not found. Do you want to generate a new GPG key? [y/N]: " generate_key
+        if [ "$generate_key" = "y" ]; then
+            gpg --full-gen-key
+            echo "Selecting RSA and RSA (default)"
+            echo -e "Key is valid for? (0) 0\ny" | gpg --expert --edit-key "${EMAIL}"
+        fi
+    fi
+}
+
+# function to create and move necessary files to appropriate directories
+function create_files() {
+    # Key.asc, Key.gpg
+    gpg --export-secret-keys "${EMAIL}" > Key.asc
+    gpg --import Key.asc
+    gpg --armor --export "${EMAIL}" > Key.gpg 
+
+    # Packages, Packages.gz & Packages.xz
+    dpkg-scanpackages --multiversion . > Packages
+    gzip -k -f Packages
+    xz -k -f Packages
+
+    # Release, Release.gpg, InRelease
+    apt-ftparchive release . > Release
+    gpg --default-key "${EMAIL}" -abs -o - Release > Release.gpg
+    gpg --default-key "${EMAIL}" --clearsign -o - Release > InRelease
+
+    # Create necessary directories
+    mkdir -p dists/${PPA_NAME}/main/binary-amd64
+    mkdir -p pool/main
+
+    # Move files to appropriate directories
+    cp Release dists/${PPA_NAME}/
+    mv InRelease dists/${PPA_NAME}/
+    mv Release.gpg dists/${PPA_NAME}/
+
+    mv Packages.gz dists/${PPA_NAME}/main/binary-amd64/
+    mv Packages.xz dists/${PPA_NAME}/main/binary-amd64/
+    mv Release dists/${PPA_NAME}/main/binary-amd64/
+
+    echo "deb [signed-by=/etc/apt/trusted.gpg.d/KEY.gpg] https://${GITHUB_USERNAME}.github.io/${PPA_NAME} ./" > ${PPA_NAME}.list
+
+    # Commit & push
+    git add -A
+    git commit -m update
+    git push
+    )
+
+    # Prompt user to add the repository to their system
+    read -p "Do you want to add the repository to your system? [y/N]: " add_repo
+
+    if [ "$add_repo" = "y" ]; then
+    # Import the repository key
+    curl -s --compressed "https://${GITHUB_USERNAME}.github.io/${PPA_NAME}/Key.gpg" | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/Key.gpg >/dev/null
+    
+    # Add the repository to sources.list.d
+    sudo curl -s --compressed -o /etc/apt/sources.list.d/${PPA_NAME}.list "https://${GITHUB_USERNAME}.github.io/${PPA_NAME}/${PPA_NAME}.list"
+    
+    # Update the package list
+    sudo apt update
+    fi
+
