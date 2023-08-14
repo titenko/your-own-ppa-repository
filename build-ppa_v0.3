@@ -34,8 +34,8 @@ function read_github_username() {
 function read_ppa_name() {
     while true
     do
-      read -p "Enter the name of your repository on GitHub (Latin characters only): " ppa_name
-      if [[ $ppa_name =~ ^[a-zA-Z0-9_]+$ ]]; then
+      read -p "Enter the name of your repository on GitHub (Latin characters and symbols only): " ppa_name
+      if [[ $ppa_name =~ ^[a-zA-Z0-9_!@#$%^&*()-+=]+$ ]]; then
         export PPA_NAME="$ppa_name"
         echo "GitHub repository name saved: $PPA_NAME"
         break
@@ -44,6 +44,7 @@ function read_ppa_name() {
       fi
     done
 }
+
 
 # function to generate GPG key if requested
 function generate_gpg_key() {
@@ -104,7 +105,6 @@ function create_files() {
     git add -A
     git commit -m update
     git push
-    )
 
     # Prompt user to add the repository to their system
     read -p "Do you want to add the repository to your system? [y/N]: " add_repo
